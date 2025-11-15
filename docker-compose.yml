@@ -1,3 +1,36 @@
+# ============================================================================
+# CDC Monitoring Solution - Docker Compose Services Overview
+# ============================================================================
+#
+# TIER 1 - TiDB Cluster (Database & CDC Capture)
+#   pd              | Placement Driver - Cluster coordination & management (port 2379)
+#   tikv            | Storage Engine - Distributed key-value store for TiDB (port 20160)
+#   tidb            | SQL Engine - MySQL-compatible database server (port 4000)
+#   ticdc           | CDC Engine - Real-time change capture & streaming (port 8300)
+#
+# TIER 2 - Message Queue & Coordination
+#   kafka           | Message Broker - Queues CDC events with durable storage (port 9092)
+#   zookeeper       | Coordination - Manages Kafka broker & topic metadata (port 2181)
+#
+# TIER 3 - Data Initialization
+#   db-init         | Database Schema Initialization - Creates appdb schema & seed user (one-time)
+#   cdc-task        | Changefeed Setup - Auto-creates CDC changefeed cf-kafka (one-time)
+#   mysql-client    | MySQL Client - Utility container for database access
+#
+# TIER 4 - Data Processing & Storage
+#   consumer        | Node.js Consumer - Consumes Kafka events, indexes to ES, exposes Prometheus (port 3000)
+#   elasticsearch   | Search Engine - Full-text indexed storage for CDC events (port 9200)
+#   kibana          | Event Explorer - Web UI for searching & analyzing ES documents (port 5601)
+#
+# TIER 5 - Monitoring & Visualization
+#   prometheus      | Metrics Database - Time-series storage for operational metrics (port 9090)
+#   grafana         | Dashboard Platform - Visualizes Prometheus metrics & ES data (port 3001)
+#
+# DATA FLOW: TiDB → TiCDC → Kafka → Consumer → Elasticsearch (events) + Prometheus (metrics) → Grafana/Kibana (visualization)
+# ============================================================================
+
+
+
 networks:
   backend:
     driver: bridge
