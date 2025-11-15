@@ -1,6 +1,6 @@
 # 📸 Screenshots - CDC Monitoring Solution
 
-**Author:** Almog Nachshon
+**Author:** Almog Nachshon/Levinshtein
 
 This folder contains visual evidence of the complete CDC monitoring ecosystem running end-to-end.
 
