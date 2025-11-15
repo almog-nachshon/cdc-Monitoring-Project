@@ -1,6 +1,6 @@
 # TiDB CDC Monitoring Stack – Complete Solution
 
-**Author:** Almog Nachshon
+**Author:** Almog Nachshon/Levinshtein
 
 > **A production-ready, real-time Change Data Capture (CDC) monitoring ecosystem built with Docker Compose**
 
