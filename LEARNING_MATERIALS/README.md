@@ -19,6 +19,7 @@ This directory contains comprehensive study materials for your upcoming physical
 **Best for:** Deep understanding of every component
 
 **Contents:**
+
 - Quick Overview
 - Architecture Explained (with diagrams)
 - 7 Key Components Deep Dive
