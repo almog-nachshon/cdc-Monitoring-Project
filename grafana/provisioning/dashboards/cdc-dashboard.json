@@ -1,0 +1,58 @@
+{
+  "id": null,
+  "uid": "cdc-dashboard",
+  "title": "TiDB CDC Monitoring",
+  "timezone": "browser",
+  "schemaVersion": 38,
+  "version": 1,
+  "refresh": "10s",
+  "time": {
+    "from": "now-1h",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "type": "table",
+      "title": "Raw CDC Events (Elasticsearch)",
+      "gridPos": { "x": 0, "y": 0, "w": 24, "h": 10 },
+      "datasource": {
+        "type": "elasticsearch",
+        "uid": null,
+        "name": "Elasticsearch"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "query": "*",
+          "timeField": "ts_ms"
+        }
+      ],
+      "options": {
+        "showHeader": true
+      }
+    },
+    {
+      "type": "piechart",
+      "title": "CDC Events by Operation (last 1h)",
+      "gridPos": { "x": 0, "y": 10, "w": 12, "h": 10 },
+      "datasource": {
+        "type": "prometheus",
+        "uid": null,
+        "name": "Prometheus"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (op) (increase(cdc_events_total[1h]))",
+          "legendFormat": "{{op}}"
+        }
+      ],
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "right"
+        }
+      }
+    }
+  ]
+}

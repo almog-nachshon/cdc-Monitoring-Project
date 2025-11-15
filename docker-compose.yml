@@ -1,0 +1,215 @@
+networks:
+  backend:
+    driver: bridge
+
+services:
+  # ==========================
+  # TiDB Cluster (PD, TiKV, TiDB, TiCDC)
+  # ==========================
+  pd:
+    image: pingcap/pd:v6.5.0
+    command:
+      - --name=pd
+      - --data-dir=/var/lib/pd
+      # bind for all service in container 
+      - --client-urls=http://0.0.0.0:2379
+      - --peer-urls=http://0.0.0.0:2380
+
+      # bind for all services from container to outside from cluster
+      - --advertise-client-urls=http://pd:2379
+      - --advertise-peer-urls=http://pd:2380
+    ports:
+      - "2379:2379"
+    restart: unless-stopped
+    networks:
+      - backend
+
+  tikv:
+    image: pingcap/tikv:v6.5.0
+    command:
+      - --pd=pd:2379
+      - --addr=0.0.0.0:20160
+      - --advertise-addr=tikv:20160
+      - --status-addr=0.0.0.0:20180
+      - --advertise-status-addr=tikv:20180
+      - --data-dir=/var/lib/tikv
+    depends_on:
+      - pd
+    restart: unless-stopped
+    networks:
+      - backend
+
+  tidb:
+    image: pingcap/tidb:v6.5.0
+    command:
+      - -store=tikv
+      - -path=pd:2379
+      - -host=0.0.0.0
+      - -advertise-address=tidb
+      - -P=4000
+      - -status=10080
+    depends_on:
+      - pd
+      - tikv
+    ports:
+      - "4000:4000"
+    restart: unless-stopped
+    networks:
+      backend:
+        aliases:
+          - tidb
+
+  ticdc:
+    image: pingcap/ticdc:v6.5.0
+    command:
+      - "/cdc"
+      - "server"
+      - "--pd=http://pd:2379"
+      - "--addr=0.0.0.0:8300"
+      - "--advertise-addr=ticdc:8300"
+    ports:
+      - "8300:8300"
+    depends_on:
+      - tidb
+    restart: unless-stopped
+    networks:
+      - backend
+
+  # ==========================
+  # TiDB init – schema & seed data
+  # ==========================
+  db-init:
+    image: mysql:8.0
+    depends_on:
+      - tidb
+    networks:
+      - backend
+    volumes:
+      - ./db/init.sql:/init.sql
+    command: >-
+      /bin/sh -lc 'set -eu; echo "[db-init] Start: waiting for TiDB at tidb:4000"; max_retries=60; interval=2; i=0; while ! mysql -h tidb -P 4000 -uroot -e "SELECT 1" >/dev/null 2>&1; do i=$$((i+1)); if [ "$$i" -ge "$$max_retries" ]; then echo "[db-init] ERROR: TiDB not ready after $$((max_retries*interval)) seconds" >&2; exit 1; fi; echo "[db-init] TiDB not ready yet (attempt $$i/$$max_retries), sleeping $${interval}s..."; sleep $${interval}; done; echo "[db-init] TiDB is ready, executing /init.sql"; if [ ! -f /init.sql ]; then echo "[db-init] ERROR: /init.sql not found in container" >&2; exit 1; fi; mysql -h tidb -P 4000 -uroot < /init.sql; rc=$$?; if [ $$rc -ne 0 ]; then echo "[db-init] ERROR: mysql returned exit code $$rc" >&2; exit $$rc; fi; echo "[db-init] Completed successfully"; exit 0'
+
+  mysql-client:
+    image: mysql:8.0
+    command: ["sleep", "infinity"]
+    depends_on:
+      - tidb
+    networks:
+      - backend
+
+  # ==========================
+  # Kafka (ZooKeeper + Kafka)
+  # ==========================
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+    ports:
+      - "2181:2181"
+    networks:
+      - backend
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: "zookeeper:2181"
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+    networks:
+      - backend
+
+  # ==========================
+  # TiCDC → Kafka changefeed
+  # ==========================
+  cdc-task:
+    image: curlimages/curl:8.6.0
+    depends_on:
+      - ticdc
+      - kafka
+      - db-init
+    networks:
+      - backend
+    volumes:
+      - ./db/cdc-init.sh:/cdc-init.sh
+    command: ["/bin/sh", "/cdc-init.sh"]
+
+  # ==========================
+  # Node.js Consumer (Kafka → ES, Prometheus metrics)
+  # ==========================
+  consumer:
+    build: ./consumer
+    depends_on:
+      - kafka
+      - elasticsearch
+    environment:
+      - KAFKA_BROKER=kafka:9092
+      - KAFKA_TOPIC=tidb-cdc
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - ELASTICSEARCH_INDEX=cdc-events
+    ports:
+      - "3000:3000"  # /metrics endpoint for Prometheus
+    networks:
+      - backend
+
+  # ==========================
+  # Elasticsearch + Kibana
+  # ==========================
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.7.0
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - "9200:9200"
+    networks:
+      - backend
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.7.0
+    depends_on:
+      - elasticsearch
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+    ports:
+      - "5601:5601"
+    networks:
+      - backend
+
+  # ==========================
+  # Prometheus
+  # ==========================
+  prometheus:
+    image: prom/prometheus:v2.54.0
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml
+    ports:
+      - "9090:9090"
+    networks:
+      - backend
+
+  # ==========================
+  # Grafana (dashboards autoprovision)
+  # ==========================
+  grafana:
+    image: grafana/grafana:11.0.0
+    depends_on:
+      - prometheus
+      - elasticsearch
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+    ports:
+      - "3001:3000"
+    volumes:
+      - ./grafana/provisioning:/etc/grafana/provisioning
+    networks:
+      - backend
